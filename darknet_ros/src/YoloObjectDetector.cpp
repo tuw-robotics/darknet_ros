@@ -155,16 +155,32 @@ void YoloObjectDetector::init()
   nodeHandle_.param("publishers/detection_image/queue_size", detectionImageQueueSize, 1);
   nodeHandle_.param("publishers/detection_image/latch", detectionImageLatch, true);
 
-  imageSubscriber_ = imageTransport_.subscribe(cameraTopicName, cameraQueueSize,
-                                               &YoloObjectDetector::cameraCallback, this);
+  //imageSubscriber_ = imageTransport_.subscribe(cameraTopicName, cameraQueueSize,
+  //                                             &YoloObjectDetector::cameraCallback, this);
   objectPublisher_ = nodeHandle_.advertise<std_msgs::Int8>(objectDetectorTopicName,
                                                            objectDetectorQueueSize,
                                                            objectDetectorLatch);
+
+  objectDetectionPublisher_ = nodeHandle_.advertise<tuw_object_msgs::ObjectDetection>("object_detections_tuw", 1);
+
   boundingBoxesPublisher_ = nodeHandle_.advertise<darknet_ros_msgs::BoundingBoxes>(
       boundingBoxesTopicName, boundingBoxesQueueSize, boundingBoxesLatch);
   detectionImagePublisher_ = nodeHandle_.advertise<sensor_msgs::Image>(detectionImageTopicName,
                                                                        detectionImageQueueSize,
                                                                        detectionImageLatch);
+                                                                       
+  cameraInfoSubscriber_ = std::unique_ptr<message_filters::Subscriber<sensor_msgs::CameraInfo>>(
+                    new message_filters::Subscriber<sensor_msgs::CameraInfo>(nodeHandle_, "camera_info", 1));
+
+  depthImageSubscriber_ = std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image>>(
+                    new message_filters::Subscriber<sensor_msgs::Image>(nodeHandle_, "image_depth", 1));
+
+  colorImageSubscriber_ = std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image>>(
+                    new message_filters::Subscriber<sensor_msgs::Image>(nodeHandle_, "image_color", 1));
+
+  syncImage_ = std::unique_ptr<message_filters::Synchronizer<syncPolicyImage>>(new message_filters::Synchronizer<syncPolicyImage>(syncPolicyImage(40), *colorImageSubscriber_, *depthImageSubscriber_, *cameraInfoSubscriber_));
+
+  syncImage_->registerCallback(boost::bind(&YoloObjectDetector::cameraCallback, this, _1, _2, _3));
 
   // Action servers.
   std::string checkForObjectsActionName;
@@ -179,24 +195,49 @@ void YoloObjectDetector::init()
   checkForObjectsActionServer_->start();
 }
 
-void YoloObjectDetector::cameraCallback(const sensor_msgs::ImageConstPtr& msg)
+//void YoloObjectDetector::cameraCallback(const sensor_msgs::ImageConstPtr& msg)
+void YoloObjectDetector::cameraCallback(const sensor_msgs::ImageConstPtr& color_image,
+                                      const sensor_msgs::ImageConstPtr& depth_image,
+                                      const sensor_msgs::CameraInfoConstPtr& camera_info)
 {
   ROS_DEBUG("[YoloObjectDetector] USB image received.");
 
   cv_bridge::CvImagePtr cam_image;
+  cv_bridge::CvImagePtr cam_image_depth;
+
+  Eigen::Matrix<float, 3, 3> K;
+  K(0, 0) = camera_info->K[0];
+  K(0, 1) = camera_info->K[1];
+  K(0, 2) = camera_info->K[2];
+  K(1, 0) = camera_info->K[3];
+  K(1, 1) = camera_info->K[4];
+  K(1, 2) = camera_info->K[5];
+  K(2, 0) = camera_info->K[6];
+  K(2, 1) = camera_info->K[7];
+  K(2, 2) = camera_info->K[8];
+
+  K_inv_ = K.inverse();
 
   try {
-    cam_image = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-    imageHeader_ = msg->header;
+    cam_image = cv_bridge::toCvCopy(color_image, sensor_msgs::image_encodings::BGR8);
+    imageHeader_ = color_image->header;
   } catch (cv_bridge::Exception& e) {
     ROS_ERROR("cv_bridge exception: %s", e.what());
     return;
   }
 
-  if (cam_image) {
+  try {
+    cam_image_depth = cv_bridge::toCvCopy(depth_image, depth_image->encoding);
+  } catch (cv_bridge::Exception& e) {
+    ROS_ERROR("cv_bridge exception: %s", e.what());
+    return;
+  }
+
+  if (cam_image && cam_image_depth) {
     {
       boost::unique_lock<boost::shared_mutex> lockImageCallback(mutexImageCallback_);
       camImageCopy_ = cam_image->image.clone();
+      camImageDepthCopy_ = cam_image_depth->image.clone();
     }
     {
       boost::unique_lock<boost::shared_mutex> lockImageStatus(mutexImageStatus_);
@@ -534,6 +575,7 @@ void YoloObjectDetector::yolo()
         displayInThread(0);
       }
       publishInThread();
+      show_image_cv(buff_[(buffIndex_ + 1)%3], "YOLO V3", ipl_);
     } else {
       char name[256];
       sprintf(name, "%s_%08d", demoPrefix_, count);
@@ -576,6 +618,18 @@ void *YoloObjectDetector::publishInThread()
     ROS_DEBUG("Detection image has not been broadcasted.");
   }
 
+  tuw_object_msgs::ObjectDetection detected_persons_tuw;
+  detected_persons_tuw.header = imageHeader_;
+  detected_persons_tuw.type = tuw_object_msgs::ObjectDetection::OBJECT_TYPE_PERSON;
+  detected_persons_tuw.view_direction.w = 1;
+  detected_persons_tuw.view_direction.x = 0;
+  detected_persons_tuw.view_direction.y = 0;
+  detected_persons_tuw.view_direction.z = 0;
+  detected_persons_tuw.sensor_type = tuw_object_msgs::ObjectDetection::SENSOR_TYPE_GENERIC_RGBD;
+
+  Eigen::Vector3f P3D;
+  Eigen::Vector3f center_point;
+
   // Publish bounding boxes and detection result.
   int num = roiBoxes_[0].num;
   if (num > 0 && num <= 100) {
@@ -609,6 +663,89 @@ void *YoloObjectDetector::publishInThread()
           boundingBox.xmax = xmax;
           boundingBox.ymax = ymax;
           boundingBoxesResults_.bounding_boxes.push_back(boundingBox);
+
+          if(boundingBox.Class == std::string("person"))
+          {
+            center_point(0) = xmin + (xmax - xmin) / 2;
+            center_point(1) = ymax;
+            center_point(2) = 1;
+
+            cv::circle(camImageCopy_, cv::Point(center_point(0), center_point(1)), 4, cv::Scalar(0, 0, 255), -1, 8, 0);
+
+
+            int rect_width = (int)(xmax - xmin);
+            int rect_height = (int)(ymax - ymin);
+
+            cv::Rect rect = cv::Rect(xmin, ymin, rect_width, rect_height);
+            //cv::rectangle(camImageCopy_, rect, cv::Scalar(0, 0, 255), 3, 8, 0);
+
+            if((rect & cv::Rect(0, 0, camImageDepthCopy_.cols, camImageDepthCopy_.rows)) != rect)
+              continue;
+
+            cv::Mat bb = camImageDepthCopy_(rect).clone();
+
+            bb = bb.reshape(0, 1);
+
+            std::vector<float> bb_vec;
+            bb.copyTo(bb_vec);
+
+            bb_vec.erase(std::remove_if(bb_vec.begin(), bb_vec.end(),
+                                        [](float& x){ return (std::isnan(x) || std::isinf(x)); }), bb_vec.end());
+
+            double depth = 0;
+
+            // median depth
+            if(bb_vec.size() % 2 == 0)
+            {
+              const auto median_it1 = bb_vec.begin() + bb_vec.size() / 2 - 1;
+              const auto median_it2 = bb_vec.begin() + bb_vec.size() / 2;
+
+              std::nth_element(bb_vec.begin(), median_it1, bb_vec.end());
+              const double median_1 = *median_it1;
+              std::nth_element(bb_vec.begin(), median_it2, bb_vec.end());
+              const double median_2 = *median_it2;
+              
+              depth = (median_1 + median_2) / 2;
+            }
+            else
+            {
+              const auto median_it = bb_vec.begin() + bb_vec.size() / 2;
+              std::nth_element(bb_vec.begin(), median_it, bb_vec.end());
+              depth = *median_it;
+            }
+
+            P3D = K_inv_ * center_point;
+
+            // check for nans
+            if (!std::isnan(depth) && !std::isinf(depth) && !std::isnan(P3D(0)) && !std::isnan(P3D(1)))
+            {
+              tuw_object_msgs::ObjectWithCovariance obj;
+
+              obj.covariance_pose.emplace_back(0.2);
+              obj.covariance_pose.emplace_back(0);
+              obj.covariance_pose.emplace_back(0);
+
+              obj.covariance_pose.emplace_back(0);
+              obj.covariance_pose.emplace_back(0.2);
+              obj.covariance_pose.emplace_back(0);
+
+              obj.covariance_pose.emplace_back(0);
+              obj.covariance_pose.emplace_back(0);
+              obj.covariance_pose.emplace_back(0.2);
+
+              obj.object.ids.emplace_back(i);
+              obj.object.ids_confidence.emplace_back(1.0);
+              obj.object.pose.position.x = P3D(0);
+              obj.object.pose.position.y = P3D(1);
+              obj.object.pose.position.z = depth;
+              obj.object.pose.orientation.x = 0.0;
+              obj.object.pose.orientation.y = 0.0;
+              obj.object.pose.orientation.z = 0.0;
+              obj.object.pose.orientation.w = 1.0;
+
+              detected_persons_tuw.objects.emplace_back(obj);
+            }
+          }
         }
       }
     }
@@ -616,6 +753,9 @@ void *YoloObjectDetector::publishInThread()
     boundingBoxesResults_.header.frame_id = "detection";
     boundingBoxesResults_.image_header = imageHeader_;
     boundingBoxesPublisher_.publish(boundingBoxesResults_);
+
+    objectDetectionPublisher_.publish(detected_persons_tuw);
+
   } else {
     std_msgs::Int8 msg;
     msg.data = 0;

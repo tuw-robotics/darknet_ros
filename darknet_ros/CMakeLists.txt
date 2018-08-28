@@ -56,6 +56,7 @@ find_package(catkin REQUIRED
     actionlib
     darknet_ros_msgs
     image_transport
+    tuw_object_msgs
 )
 
 # Enable OPENCV in darknet
