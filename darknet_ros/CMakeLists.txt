@@ -57,6 +57,7 @@ find_package(catkin REQUIRED
     darknet_ros_msgs
     image_transport
     tuw_object_msgs
+    rwth_perception_people_msgs
 )
 
 # Enable OPENCV in darknet

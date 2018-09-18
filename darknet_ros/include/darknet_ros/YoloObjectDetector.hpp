@@ -55,6 +55,8 @@
 // Eigen3
 #include <eigen3/Eigen/Dense>
 
+#include <rwth_perception_people_msgs/GroundPlane.h>
+
 extern "C" {
 #include "network.h"
 #include "detection_layer.h"
@@ -114,6 +116,8 @@ void cameraCallback(const sensor_msgs::ImageConstPtr& color_image,
                     const sensor_msgs::ImageConstPtr& depth_image,
                     const sensor_msgs::CameraInfoConstPtr& camera_info);
 
+void groundPlaneCallback(const rwth_perception_people_msgs::GroundPlane::ConstPtr& gp);
+
 /*!
  * Check for objects action goal callback.
  */
@@ -140,6 +144,10 @@ bool publishDetectionImage(const cv::Mat& detectionImage);
 typedef actionlib::SimpleActionServer<darknet_ros_msgs::CheckForObjectsAction> CheckForObjectsActionServer;
 typedef std::shared_ptr<CheckForObjectsActionServer> CheckForObjectsActionServerPtr;
 
+rwth_perception_people_msgs::GroundPlane::ConstPtr gp_;
+Eigen::Vector3f gpn_;
+float gpd_;
+
 //! ROS node handle.
 ros::NodeHandle nodeHandle_;
 
@@ -155,6 +163,7 @@ image_transport::ImageTransport imageTransport_;
 
 //! ROS subscriber and publisher.
 image_transport::Subscriber imageSubscriber_;
+ros::Subscriber gpSubscriber_;
 ros::Publisher objectPublisher_;
 ros::Publisher boundingBoxesPublisher_;
 ros::Publisher objectDetectionPublisher_;

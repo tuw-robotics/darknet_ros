@@ -155,6 +155,8 @@ void YoloObjectDetector::init()
   nodeHandle_.param("publishers/detection_image/queue_size", detectionImageQueueSize, 1);
   nodeHandle_.param("publishers/detection_image/latch", detectionImageLatch, true);
 
+  gpSubscriber_ = nodeHandle_.subscribe("ground_plane", 100, &YoloObjectDetector::groundPlaneCallback, this);
+
   //imageSubscriber_ = imageTransport_.subscribe(cameraTopicName, cameraQueueSize,
   //                                             &YoloObjectDetector::cameraCallback, this);
   objectPublisher_ = nodeHandle_.advertise<std_msgs::Int8>(objectDetectorTopicName,
@@ -629,6 +631,15 @@ void *YoloObjectDetector::publishInThread()
 
   Eigen::Vector3f P3D;
   Eigen::Vector3f center_point;
+  Eigen::Vector3f P0(0, 0, 0);
+  Eigen::Vector3f P1;
+  Eigen::Vector3f P1_ground;
+  Eigen::Vector3f P_diff;
+  
+  Eigen::Vector2f eigenvector1;
+  Eigen::Vector2f eigenvector2;
+  double eigenvalue1 = 10;  // 50
+  double eigenvalue2 = 0.1;
 
   // Publish bounding boxes and detection result.
   int num = roiBoxes_[0].num;
@@ -671,8 +682,42 @@ void *YoloObjectDetector::publishInThread()
             center_point(2) = 1;
 
             cv::circle(camImageCopy_, cv::Point(center_point(0), center_point(1)), 4, cv::Scalar(0, 0, 255), -1, 8, 0);
+            
+            // calculate 3D position through intersection with ground plane
+            P1 = K_inv_ * center_point;
+            P_diff = P1 - P0;
+            float nom = gpd_ - gpn_.dot(P0);
+            float denom = gpn_.dot(P_diff);
 
+            if (denom != 0)
+            {
+              P3D = P0 + nom / denom * P_diff;
 
+              // move point P1 onto the ground plane s.t.
+              // P1_ground, P3D define a line segement on the GP in direction towards the detection
+              P1_ground = P1;
+              P1_ground(1) = P3D(1);  // y is coordinate to ground
+
+              eigenvector1(0) = (P3D - P1_ground).normalized()(0);
+              eigenvector1(1) = (P3D - P1_ground).normalized()(2);
+              // second eigenvector is orthogonal to first
+              // i.e. eigenvector1 . eigenvector2 = 0
+              eigenvector2(0) = -eigenvector1(1);
+              eigenvector2(1) = eigenvector1(0);
+
+              // construct covariance from eigenvectors
+
+              Eigen::Matrix2d P;
+              Eigen::Matrix<double, 2, 2, Eigen::RowMajor> Q;
+              Eigen::Matrix<double, 2, 2> diag;
+              diag << eigenvalue1, 0, 0, eigenvalue2;
+
+              P.leftCols(1) = eigenvector1.cast<double>();
+              P.rightCols(1) = eigenvector2.cast<double>();
+
+              Q = P * diag * P.inverse();
+
+            /*
             int rect_width = (int)(xmax - xmin);
             int rect_height = (int)(ymax - ymin);
 
@@ -715,35 +760,50 @@ void *YoloObjectDetector::publishInThread()
             }
 
             P3D = K_inv_ * center_point;
-
+*/
             // check for nans
-            if (!std::isnan(depth) && !std::isinf(depth) && !std::isnan(P3D(0)) && !std::isnan(P3D(1)))
+            if (!std::isnan(P3D(0)) && !std::isnan(P3D(1)))
             {
               tuw_object_msgs::ObjectWithCovariance obj;
 
-              obj.covariance_pose.emplace_back(0.2);
+              obj.object.shape_variables.emplace_back(P1_ground(0));
+              obj.object.shape_variables.emplace_back(P1_ground(1));
+              obj.object.shape_variables.emplace_back(P1_ground(2));
+              
+              obj.object.shape_variables.emplace_back(P3D(0));
+              obj.object.shape_variables.emplace_back(P3D(1));
+              obj.object.shape_variables.emplace_back(P3D(2));
+              
+              obj.covariance_pose.emplace_back(Q(0, 0));
+              obj.covariance_pose.emplace_back(0);
+              obj.covariance_pose.emplace_back(Q(1, 0));
+
+              obj.covariance_pose.emplace_back(0);
               obj.covariance_pose.emplace_back(0);
               obj.covariance_pose.emplace_back(0);
 
+              obj.covariance_pose.emplace_back(Q(0, 1));
               obj.covariance_pose.emplace_back(0);
-              obj.covariance_pose.emplace_back(0.2);
-              obj.covariance_pose.emplace_back(0);
-
-              obj.covariance_pose.emplace_back(0);
-              obj.covariance_pose.emplace_back(0);
-              obj.covariance_pose.emplace_back(0.2);
+              obj.covariance_pose.emplace_back(Q(1, 1));
 
               obj.object.ids.emplace_back(i);
               obj.object.ids_confidence.emplace_back(1.0);
               obj.object.pose.position.x = P3D(0);
               obj.object.pose.position.y = P3D(1);
-              obj.object.pose.position.z = depth;
+              obj.object.pose.position.z = P3D(2);
               obj.object.pose.orientation.x = 0.0;
               obj.object.pose.orientation.y = 0.0;
               obj.object.pose.orientation.z = 0.0;
               obj.object.pose.orientation.w = 1.0;
-
-              detected_persons_tuw.objects.emplace_back(obj);
+              
+              ROS_WARN("P3D(0): %f", P3D(0));
+              ROS_WARN("P3D(1): %f", P3D(1));
+              ROS_WARN("P3D(2): %f", P3D(2));
+              if (std::hypot(P3D(0), P3D(2)) <= 9.0 && P3D(2) >= 0.0)
+              {
+                detected_persons_tuw.objects.emplace_back(obj);
+              }
+            }
             }
           }
         }
@@ -775,6 +835,20 @@ void *YoloObjectDetector::publishInThread()
   }
 
   return 0;
+}
+
+void YoloObjectDetector::groundPlaneCallback(const rwth_perception_people_msgs::GroundPlane::ConstPtr& gp)
+{
+  gp_ = gp;
+
+  // ground plane normal vector
+  gpn_(0) = gp_->n[0];
+  gpn_(1) = gp_->n[1];
+  gpn_(2) = gp_->n[2];
+
+  // ground plane distance
+  gpd_ = ((float)gp_->d) * (-1.0);
+  
 }
 
 
