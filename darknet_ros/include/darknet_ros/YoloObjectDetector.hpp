@@ -45,6 +45,8 @@
 // object msgs
 #include <tuw_object_msgs/ObjectDetection.h>
 
+#include <rwth_perception_people_msgs/GroundPlane.h>
+
 // Darknet.
 #ifdef GPU
 #include "cuda_runtime.h"
@@ -67,153 +69,166 @@ extern "C" {
 #include <sys/time.h>
 }
 
-extern "C" void ipl_into_image(IplImage* src, image im);
-extern "C" image ipl_to_image(IplImage* src);
+extern "C" void ipl_into_image(IplImage *src, image im);
+extern "C" image ipl_to_image(IplImage *src);
 extern "C" void show_image_cv(image p, const char *name, IplImage *disp);
 
-namespace darknet_ros {
-
+namespace darknet_ros
+{
 //! Bounding box of the detected object.
 typedef struct
 {
-float x, y, w, h, prob;
-int num, Class;
+  float x, y, w, h, prob;
+  int num, Class;
 } RosBox_;
 
 class YoloObjectDetector
 {
 public:
-/*!
- * Constructor.
- */
-explicit YoloObjectDetector(ros::NodeHandle nh);
+  /*!
+   * Constructor.
+   */
+  explicit YoloObjectDetector(ros::NodeHandle nh);
 
-/*!
- * Destructor.
- */
-~YoloObjectDetector();
+  /*!
+   * Destructor.
+   */
+  ~YoloObjectDetector();
 
 private:
-/*!
- * Reads and verifies the ROS parameters.
- * @return true if successful.
- */
-bool readParameters();
+  /*!
+   * Reads and verifies the ROS parameters.
+   * @return true if successful.
+   */
+  bool readParameters();
 
-/*!
- * Initialize the ROS connections.
- */
-void init();
+  /*!
+   * Initialize the ROS connections.
+   */
+  void init();
 
-/*!
- * Callback of camera.
- * @param[in] msg image pointer.
- */
-//void cameraCallback(const sensor_msgs::ImageConstPtr& msg);
-void cameraCallback(const sensor_msgs::ImageConstPtr& color_image,
-                    const sensor_msgs::ImageConstPtr& depth_image,
-                    const sensor_msgs::CameraInfoConstPtr& camera_info);
+  /*!
+   * Callback of camera.
+   * @param[in] msg image pointer.
+   */
+  // void cameraCallback(const sensor_msgs::ImageConstPtr& msg);
+  void cameraCallback(const sensor_msgs::ImageConstPtr &color_image, const sensor_msgs::ImageConstPtr &depth_image,
+                      const sensor_msgs::CameraInfoConstPtr &camera_info);
 
-/*!
- * Check for objects action goal callback.
- */
-void checkForObjectsActionGoalCB();
+  void groundPlaneCallback(const rwth_perception_people_msgs::GroundPlane::ConstPtr& gp);
+  
+  /*!
+   * Check for objects action goal callback.
+   */
+  void checkForObjectsActionGoalCB();
 
-/*!
- * Check for objects action preempt callback.
- */
-void checkForObjectsActionPreemptCB();
+  /*!
+   * Check for objects action preempt callback.
+   */
+  void checkForObjectsActionPreemptCB();
 
-/*!
- * Check if a preempt for the check for objects action has been requested.
- * @return false if preempt has been requested or inactive.
- */
-bool isCheckingForObjects() const;
+  /*!
+   * Check if a preempt for the check for objects action has been requested.
+   * @return false if preempt has been requested or inactive.
+   */
+  bool isCheckingForObjects() const;
 
-/*!
- * Publishes the detection image.
- * @return true if successful.
- */
-bool publishDetectionImage(const cv::Mat& detectionImage);
+  /*!
+   * Publishes the detection image.
+   * @return true if successful.
+   */
+  bool publishDetectionImage(const cv::Mat &detectionImage);
 
-//! Typedefs.
-typedef actionlib::SimpleActionServer<darknet_ros_msgs::CheckForObjectsAction> CheckForObjectsActionServer;
-typedef std::shared_ptr<CheckForObjectsActionServer> CheckForObjectsActionServerPtr;
+  //! Typedefs.
+  typedef actionlib::SimpleActionServer<darknet_ros_msgs::CheckForObjectsAction> CheckForObjectsActionServer;
+  typedef std::shared_ptr<CheckForObjectsActionServer> CheckForObjectsActionServerPtr;
+  
+  rwth_perception_people_msgs::GroundPlane::ConstPtr gp_;
+  Eigen::Vector3f gpn_;
+  float gpd_;
 
-//! ROS node handle.
-ros::NodeHandle nodeHandle_;
+  //! ROS node handle.
+  ros::NodeHandle nodeHandle_;
 
-//! Class labels.
-int numClasses_;
-std::vector<std::string> classLabels_;
+  //! Class labels.
+  int numClasses_;
+  std::vector<std::string> classLabels_;
 
-//! Check for objects action server.
-CheckForObjectsActionServerPtr checkForObjectsActionServer_;
+  //! Check for objects action server.
+  CheckForObjectsActionServerPtr checkForObjectsActionServer_;
 
-//! Advertise and subscribe to image topics.
-image_transport::ImageTransport imageTransport_;
+  //! Advertise and subscribe to image topics.
+  image_transport::ImageTransport imageTransport_;
 
-//! ROS subscriber and publisher.
-image_transport::Subscriber imageSubscriber_;
-ros::Publisher objectPublisher_;
-ros::Publisher boundingBoxesPublisher_;
-ros::Publisher objectDetectionPublisher_;
+  //! ROS subscriber and publisher.
+  image_transport::Subscriber imageSubscriber_;
+  ros::Publisher objectPublisher_;
+  ros::Publisher boundingBoxesPublisher_;
+  ros::Publisher objectDetectionPublisher_;
+  ros::Subscriber gpSubscriber_;
 
-std::unique_ptr<message_filters::Subscriber<sensor_msgs::CameraInfo>> cameraInfoSubscriber_;
-std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image>> depthImageSubscriber_;
-std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image>> colorImageSubscriber_;
+  std::unique_ptr<message_filters::Subscriber<sensor_msgs::CameraInfo>> cameraInfoSubscriber_;
+  std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image>> depthImageSubscriber_;
+  std::unique_ptr<message_filters::Subscriber<sensor_msgs::Image>> colorImageSubscriber_;
 
-typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo> syncPolicyImage;
+  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image,
+                                                          sensor_msgs::CameraInfo> syncPolicyImage;
+  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image,
+                                                          sensor_msgs::CameraInfo> syncPolicyImageMonocular;
 
-std::unique_ptr<message_filters::Synchronizer<syncPolicyImage>> syncImage_;
+  std::unique_ptr<message_filters::Synchronizer<syncPolicyImage>> syncImage_;
+  std::unique_ptr<message_filters::Synchronizer<syncPolicyImageMonocular>> syncImageMonocular_;
+  
+  // ros param
+  bool monocular_;
 
-//! Detected objects.
-std::vector<std::vector<RosBox_> > rosBoxes_;
-std::vector<int> rosBoxCounter_;
-darknet_ros_msgs::BoundingBoxes boundingBoxesResults_;
+  //! Detected objects.
+  std::vector<std::vector<RosBox_>> rosBoxes_;
+  std::vector<int> rosBoxCounter_;
+  darknet_ros_msgs::BoundingBoxes boundingBoxesResults_;
 
-//! Camera related parameters.
-int frameWidth_;
-int frameHeight_;
+  //! Camera related parameters.
+  int frameWidth_;
+  int frameHeight_;
 
-//! Publisher of the bounding box image.
-ros::Publisher detectionImagePublisher_;
+  //! Publisher of the bounding box image.
+  ros::Publisher detectionImagePublisher_;
 
-// Yolo running on thread.
-std::thread yoloThread_;
+  // Yolo running on thread.
+  std::thread yoloThread_;
 
-// Darknet.
-char **demoNames_;
-image **demoAlphabet_;
-int demoClasses_;
+  // Darknet.
+  char **demoNames_;
+  image **demoAlphabet_;
+  int demoClasses_;
 
-network *net_;
-image buff_[3];
-image buffLetter_[3];
-int buffId_[3];
-int buffIndex_ = 0;
-IplImage * ipl_;
-float fps_ = 0;
-float demoThresh_ = 0;
-float demoHier_ = .5;
-int running_ = 0;
+  network *net_;
+  image buff_[3];
+  image buffLetter_[3];
+  int buffId_[3];
+  int buffIndex_ = 0;
+  IplImage *ipl_;
+  float fps_ = 0;
+  float demoThresh_ = 0;
+  float demoHier_ = .5;
+  int running_ = 0;
 
-int demoDelay_ = 0;
-int demoFrame_ = 3;
-float **predictions_;
-int demoIndex_ = 0;
-int demoDone_ = 0;
-float *lastAvg2_;
-float *lastAvg_;
-float *avg_;
-int demoTotal_ = 0;
-double demoTime_;
+  int demoDelay_ = 0;
+  int demoFrame_ = 3;
+  float **predictions_;
+  int demoIndex_ = 0;
+  int demoDone_ = 0;
+  float *lastAvg2_;
+  float *lastAvg_;
+  float *avg_;
+  int demoTotal_ = 0;
+  double demoTime_;
 
-RosBox_ *roiBoxes_;
-bool viewImage_;
-bool enableConsoleOutput_;
-int waitKeyDelay_;
-int fullScreen_;
+  RosBox_ *roiBoxes_;
+  bool viewImage_;
+  bool enableConsoleOutput_;
+  int waitKeyDelay_;
+  int fullScreen_;
   char *demoPrefix_;
 
   std_msgs::Header imageHeader_;
@@ -249,14 +264,12 @@ int fullScreen_;
 
   void *detectLoop(void *ptr);
 
-  void setupNetwork(char *cfgfile, char *weightfile, char *datafile, float thresh,
-                    char **names, int classes,
-                    int delay, char *prefix, int avg_frames, float hier, int w, int h,
-                    int frames, int fullscreen);
+  void setupNetwork(char *cfgfile, char *weightfile, char *datafile, float thresh, char **names, int classes, int delay,
+                    char *prefix, int avg_frames, float hier, int w, int h, int frames, int fullscreen);
 
   void yolo();
 
-  IplImage* getIplImage();
+  IplImage *getIplImage();
 
   bool getImageStatus(void);
 
