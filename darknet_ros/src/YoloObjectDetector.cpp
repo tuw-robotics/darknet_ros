@@ -796,9 +796,6 @@ void *YoloObjectDetector::publishInThread()
               obj.object.pose.orientation.z = 0.0;
               obj.object.pose.orientation.w = 1.0;
               
-              ROS_WARN("P3D(0): %f", P3D(0));
-              ROS_WARN("P3D(1): %f", P3D(1));
-              ROS_WARN("P3D(2): %f", P3D(2));
               if (std::hypot(P3D(0), P3D(2)) <= 9.0 && P3D(2) >= 0.0)
               {
                 detected_persons_tuw.objects.emplace_back(obj);
@@ -820,6 +817,7 @@ void *YoloObjectDetector::publishInThread()
     std_msgs::Int8 msg;
     msg.data = 0;
     objectPublisher_.publish(msg);
+    objectDetectionPublisher_.publish(detected_persons_tuw);
   }
   if (isCheckingForObjects()) {
     ROS_DEBUG("[YoloObjectDetector] check for objects in image.");
