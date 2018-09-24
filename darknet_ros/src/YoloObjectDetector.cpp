@@ -760,6 +760,7 @@ void *YoloObjectDetector::publishInThread()
     std_msgs::Int8 msg;
     msg.data = 0;
     objectPublisher_.publish(msg);
+    objectDetectionPublisher_.publish(detected_persons_tuw);
   }
   if (isCheckingForObjects()) {
     ROS_DEBUG("[YoloObjectDetector] check for objects in image.");
