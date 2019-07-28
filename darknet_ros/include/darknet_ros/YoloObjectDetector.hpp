@@ -1,10 +1,10 @@
 /*
-* YoloObjectDetector.h
-*
-*  Created on: Dec 19, 2016
-*      Author: Marko Bjelonic
-*   Institute: ETH Zurich, Robotic Systems Lab
-*/
+ * YoloObjectDetector.h
+ *
+ *  Created on: Dec 19, 2016
+ *      Author: Marko Bjelonic
+ *   Institute: ETH Zurich, Robotic Systems Lab
+ */
 
 #pragma once
 
@@ -69,12 +69,12 @@ extern "C" {
 #include <sys/time.h>
 }
 
-extern "C" void ipl_into_image(IplImage *src, image im);
-extern "C" image ipl_to_image(IplImage *src);
+extern "C" void ipl_into_image(IplImage* src, image im);
+extern "C" image ipl_to_image(IplImage* src);
 extern "C" void show_image_cv(image p, const char *name, IplImage *disp);
 
-namespace darknet_ros
-{
+namespace darknet_ros {
+
 //! Bounding box of the detected object.
 typedef struct
 {
@@ -82,9 +82,15 @@ typedef struct
   int num, Class;
 } RosBox_;
 
+typedef struct
+{
+  IplImage* image;
+  std_msgs::Header header;
+} IplImageWithHeader_;
+
 class YoloObjectDetector
 {
-public:
+ public:
   /*!
    * Constructor.
    */
@@ -95,7 +101,7 @@ public:
    */
   ~YoloObjectDetector();
 
-private:
+ private:
   /*!
    * Reads and verifies the ROS parameters.
    * @return true if successful.
@@ -137,7 +143,7 @@ private:
    * Publishes the detection image.
    * @return true if successful.
    */
-  bool publishDetectionImage(const cv::Mat &detectionImage);
+  bool publishDetectionImage(const cv::Mat& detectionImage);
 
   //! Typedefs.
   typedef actionlib::SimpleActionServer<darknet_ros_msgs::CheckForObjectsAction> CheckForObjectsActionServer;
@@ -183,7 +189,7 @@ private:
   bool monocular_;
 
   //! Detected objects.
-  std::vector<std::vector<RosBox_>> rosBoxes_;
+  std::vector<std::vector<RosBox_> > rosBoxes_;
   std::vector<int> rosBoxCounter_;
   darknet_ros_msgs::BoundingBoxes boundingBoxesResults_;
 
@@ -203,11 +209,12 @@ private:
   int demoClasses_;
 
   network *net_;
+  std_msgs::Header headerBuff_[3];
   image buff_[3];
   image buffLetter_[3];
   int buffId_[3];
   int buffIndex_ = 0;
-  IplImage *ipl_;
+  IplImage * ipl_;
   float fps_ = 0;
   float demoThresh_ = 0;
   float demoHier_ = .5;
@@ -264,12 +271,14 @@ private:
 
   void *detectLoop(void *ptr);
 
-  void setupNetwork(char *cfgfile, char *weightfile, char *datafile, float thresh, char **names, int classes, int delay,
-                    char *prefix, int avg_frames, float hier, int w, int h, int frames, int fullscreen);
+  void setupNetwork(char *cfgfile, char *weightfile, char *datafile, float thresh,
+                    char **names, int classes,
+                    int delay, char *prefix, int avg_frames, float hier, int w, int h,
+                    int frames, int fullscreen);
 
   void yolo();
 
-  IplImage *getIplImage();
+  IplImageWithHeader_ getIplImageWithHeader();
 
   bool getImageStatus(void);
 
