@@ -15,6 +15,7 @@
   <arg name="camera_info_topic" default="$(arg robot_name)/$(arg camera)/color/camera_info"/>
   <arg name="detection_topic" default="darknet_ros/detected_persons_tuw"/>
   <arg name="monocular" default="false"/>
+  <arg name="is_realsense_d435" default="true"/>
   <!-- ROS and network parameter files -->
   <arg name="ros_param_file"             default="$(find darknet_ros)/config/ros.yaml"/>
   <arg name="network_param_file"         default="$(find darknet_ros)/config/yolov2-tiny.yaml"/>
@@ -28,7 +29,7 @@
     <param name="weights_path"          value="$(arg yolo_weights_path)" />
     <param name="config_path"           value="$(arg yolo_config_path)" />
     <param name="monocular"		value="$(arg monocular)" />
-    <param name="realsense"		value="$(arg realsense)" />
+    <param name="is_realsense_d435"		value="$(arg is_realsense_d435)" />
     <remap from="darknet_ros/image_color" to="$(arg image_color_topic)"/>
     <remap from="darknet_ros/image_depth" to="$(arg image_depth_topic)"/>
     <remap from="darknet_ros/camera_info" to="$(arg camera_info_topic)"/>

@@ -187,6 +187,7 @@ class YoloObjectDetector
   
   // ros param
   bool monocular_;
+  bool is_realsense_;
 
   //! Detected objects.
   std::vector<std::vector<RosBox_> > rosBoxes_;

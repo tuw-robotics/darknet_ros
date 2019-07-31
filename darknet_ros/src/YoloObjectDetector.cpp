@@ -90,6 +90,7 @@ void YoloObjectDetector::init()
   std::string weightsModel;
 
   nodeHandle_.param("monocular", monocular_, false);
+  nodeHandle_.param("is_realsense_d435", is_realsense_, false);
 
   // Threshold of object detection.
   float thresh;
@@ -280,7 +281,15 @@ void YoloObjectDetector::cameraCallback(const sensor_msgs::ImageConstPtr &color_
       imageHeader_ = cam_image->header;
       camImageCopy_ = cam_image->image.clone();
       if (cam_image_depth)
-        cam_image_depth->image.convertTo(camImageDepthCopy_, CV_64F, 1.0/1000.0);
+      {
+		if (is_realsense_)
+		{
+			cam_image_depth->image.convertTo(camImageDepthCopy_, CV_64F, 1.0/1000.0);
+		} else 
+		{
+			cam_image_depth->image.convertTo(camImageDepthCopy_, CV_64F);
+		}
+	  }
         //camImageDepthCopy_ = cam_image_depth->image;
     }
     {
@@ -812,7 +821,6 @@ void *YoloObjectDetector::publishInThread()
             }
             else
             {
-                std::cout << "stereo detection" << std::endl;
               int rect_width = (int)(xmax - xmin);
               int rect_height = (int)(ymax - ymin);
 
@@ -841,8 +849,6 @@ void *YoloObjectDetector::publishInThread()
 
               double depth = 0;
 
-              std::cout << "bb vec size: " << bb_vec.size() << std::endl;
-
               // median depth
               if (bb_vec.size() % 2 == 0)
               {
@@ -864,10 +870,6 @@ void *YoloObjectDetector::publishInThread()
               }
 
               P3D = K_inv_ * center_point;
-
-              std::cout << "depth " << depth << std::endl;
-              std::cout << "P3D 0 " << P3D(0) << std::endl;
-              std::cout << "P3D 1 " << P3D(1) << std::endl;
 
               // check for nans
               if (!std::isnan(depth) && !std::isinf(depth) && !std::isnan(P3D(0)) && !std::isnan(P3D(1)))
